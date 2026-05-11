@@ -87,7 +87,7 @@
                         <div class="info-value" id="wind">-</div>
                     </div>
                 </div>
-                <div class="data-source" id="data-source">데이터 출처: 기상청 초단기실황</div>
+                <div class="data-source" id="data-source">데이터 출처: 기상청</div>
                 <div class="mt-3 text-end text-muted" style="font-size: 0.8rem;">
                     최종 업데이트: <span id="update-time">-</span>
                 </div>
@@ -208,10 +208,41 @@
         event.target.classList.add('active');
     }
 
-    // 데이터 유효성 검증 함수
+    // 데이터 유효성 검증
     function isValidWeatherData(value) {
-        // -999 또는 -998 등 에러 코드는 유효하지 않음
-        return value !== null && value !== undefined && !String(value).startsWith('-99');
+        if (value === null || value === undefined) return false;
+        const numValue = parseFloat(value);
+        return !isNaN(numValue) && numValue > -100; // -999, -998 등 에러 코드 제외
+    }
+
+    // 안전한 숫자 변환 (결측치는 "데이터 없음"으로 표시)
+    function safeDisplayValue(value, unit) {
+        if (!isValidWeatherData(value)) {
+            return `데이터 없음`;
+        }
+        return `${value}${unit}`;
+    }
+
+    async function fetchWeatherFromApi(apiType, baseDate, baseTime, nx, ny) {
+        let url;
+        if (apiType === 'ncst') {
+            // 초단기실황 API
+            url = `https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst?serviceKey=${encodeURIComponent(API_KEY)}&pageNo=1&numOfRows=1000&dataType=JSON&base_date=${baseDate}&base_time=${baseTime}&nx=${nx}&ny=${ny}`;
+        } else if (apiType === 'fcst') {
+            // 초단기예보 API
+            url = `https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtFcst?serviceKey=${encodeURIComponent(API_KEY)}&pageNo=1&numOfRows=1000&dataType=JSON&base_date=${baseDate}&base_time=${baseTime}&nx=${nx}&ny=${ny}`;
+        }
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP 오류! 상태: ${response.status}`);
+        }
+
+        return await response.json();
     }
 
     async function fetchWeather() {
@@ -241,86 +272,83 @@
         const baseDate = `${year}${month}${day}`;
         const baseTime = `${String(hour).padStart(2, '0')}00`;
 
-        console.log(`API 호출 파라미터: baseDate=${baseDate}, baseTime=${baseTime}, nx=${window.currentNx}, ny=${window.currentNy}`);
-
-        const url = `https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst?serviceKey=${encodeURIComponent(API_KEY)}&pageNo=1&numOfRows=1000&dataType=JSON&base_date=${baseDate}&base_time=${baseTime}&nx=${window.currentNx}&ny=${window.currentNy}`;
+        console.log(`API 호출: baseDate=${baseDate}, baseTime=${baseTime}, nx=${window.currentNx}, ny=${window.currentNy}`);
 
         try {
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json'
-                }
-            });
+            let weatherData = null;
+            let dataSource = '';
 
-            console.log(`HTTP 상태 코드: ${response.status}`);
+            // 1단계: 초단기실황 시도
+            console.log('1단계: 초단기실황 API 시도...');
+            try {
+                const ncstData = await fetchWeatherFromApi('ncst', baseDate, baseTime, window.currentNx, window.currentNy);
+                
+                if (ncstData.response.header.resultCode === '00') {
+                    const items = ncstData.response.body.items.item;
+                    weatherData = {};
+                    items.forEach(item => {
+                        weatherData[item.category] = item.obsrValue;
+                    });
 
-            if (!response.ok) {
-                throw new Error(`HTTP 오류! 상태: ${response.status}`);
-            }
-
-            const data = await response.json();
-
-            console.log('API 응답:', data);
-
-            if (data.response.header.resultCode === '00') {
-                const items = data.response.body.items.item;
-                const weatherData = {};
-                items.forEach(item => {
-                    weatherData[item.category] = item.obsrValue;
-                });
-
-                // 데이터 유효성 검증
-                const temp = weatherData['T1H'];
-                const humidity = weatherData['REH'];
-                const rain = weatherData['RN1'];
-                const wind = weatherData['WSD'];
-
-                if (!isValidWeatherData(temp) || !isValidWeatherData(humidity)) {
-                    // 실황 데이터가 없으면 이전 시간 데이터 시도
-                    console.warn('현재 시간 데이터가 결측치입니다. 이전 시간 데이터를 시도합니다.');
-                    hour = hour - 1;
-                    if (hour < 0) hour = 23;
-                    const retryTime = `${String(hour).padStart(2, '0')}00`;
-                    const retryUrl = `https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst?serviceKey=${encodeURIComponent(API_KEY)}&pageNo=1&numOfRows=1000&dataType=JSON&base_date=${baseDate}&base_time=${retryTime}&nx=${window.currentNx}&ny=${window.currentNy}`;
-                    
-                    const retryResponse = await fetch(retryUrl);
-                    const retryData = await retryResponse.json();
-                    
-                    if (retryData.response.header.resultCode === '00') {
-                        const retryItems = retryData.response.body.items.item;
-                        const retryWeatherData = {};
-                        retryItems.forEach(item => {
-                            retryWeatherData[item.category] = item.obsrValue;
-                        });
-                        
-                        document.getElementById('temp').innerText = retryWeatherData['T1H'] + '°C';
-                        document.getElementById('humidity').innerText = retryWeatherData['REH'] + '%';
-                        document.getElementById('rain').innerText = retryWeatherData['RN1'] + 'mm';
-                        document.getElementById('wind').innerText = retryWeatherData['WSD'] + 'm/s';
-                        document.getElementById('update-time').innerText = `${baseDate} ${retryTime} (이전 시간)`;
-                        document.getElementById('data-source').innerText = '데이터 출처: 기상청 초단기실황 (이전 시간 데이터)';
-                        
-                        updateRecommendations(retryWeatherData['T1H'], retryWeatherData['PTY']);
+                    // 데이터 유효성 검증
+                    if (isValidWeatherData(weatherData['T1H']) && isValidWeatherData(weatherData['REH'])) {
+                        console.log('✓ 초단기실황 데이터 사용');
+                        dataSource = '기상청 초단기실황';
                     } else {
-                        throw new Error('모든 시간의 데이터를 가져올 수 없습니다.');
+                        console.log('✗ 초단기실황 데이터 결측치 - 2단계로 진행');
+                        weatherData = null;
                     }
-                } else {
-                    document.getElementById('temp').innerText = temp + '°C';
-                    document.getElementById('humidity').innerText = humidity + '%';
-                    document.getElementById('rain').innerText = rain + 'mm';
-                    document.getElementById('wind').innerText = wind + 'm/s';
-                    document.getElementById('update-time').innerText = `${baseDate} ${baseTime}`;
-                    document.getElementById('data-source').innerText = '데이터 출처: 기상청 초단기실황';
-                    
-                    updateRecommendations(temp, weatherData['PTY']);
                 }
-            } else {
-                console.error('API 에러 응답:', data.response.header);
-                alert('데이터를 가져오는데 실패했습니다: ' + data.response.header.resultMsg);
+            } catch (error) {
+                console.error('초단기실황 API 오류:', error);
             }
+
+            // 2단계: 초단기예보 시도
+            if (!weatherData) {
+                console.log('2단계: 초단기예보 API 시도...');
+                try {
+                    const fcstData = await fetchWeatherFromApi('fcst', baseDate, baseTime, window.currentNx, window.currentNy);
+                    
+                    if (fcstData.response.header.resultCode === '00') {
+                        const items = fcstData.response.body.items.item;
+                        weatherData = {};
+                        items.forEach(item => {
+                            weatherData[item.category] = item.obsrValue;
+                        });
+
+                        if (isValidWeatherData(weatherData['T1H'])) {
+                            console.log('✓ 초단기예보 데이터 사용');
+                            dataSource = '기상청 초단기예보 (실황 데이터 부재)';
+                        } else {
+                            weatherData = null;
+                        }
+                    }
+                } catch (error) {
+                    console.error('초단기예보 API 오류:', error);
+                }
+            }
+
+            // 3단계: 데이터 표시
+            if (weatherData) {
+                document.getElementById('temp').innerText = safeDisplayValue(weatherData['T1H'], '°C');
+                document.getElementById('humidity').innerText = safeDisplayValue(weatherData['REH'], '%');
+                document.getElementById('rain').innerText = safeDisplayValue(weatherData['RN1'], 'mm');
+                document.getElementById('wind').innerText = safeDisplayValue(weatherData['WSD'], 'm/s');
+                document.getElementById('update-time').innerText = `${baseDate} ${baseTime}`;
+                document.getElementById('data-source').innerText = `데이터 출처: ${dataSource}`;
+                
+                updateRecommendations(weatherData['T1H'], weatherData['PTY']);
+            } else {
+                document.getElementById('temp').innerText = '데이터 없음';
+                document.getElementById('humidity').innerText = '데이터 없음';
+                document.getElementById('rain').innerText = '데이터 없음';
+                document.getElementById('wind').innerText = '데이터 없음';
+                document.getElementById('data-source').innerText = '데이터 출처: 일시적 오류 - 잠시 후 다시 시도해주세요';
+                alert('현재 해당 지역의 날씨 데이터를 불러올 수 없습니다.\n잠시 후 다시 시도해주세요.');
+            }
+
         } catch (error) {
-            console.error('네트워크 오류:', error);
+            console.error('날씨 조회 오류:', error);
             alert('API 호출 중 오류가 발생했습니다:\n' + error.message);
         } finally {
             loading.style.display = 'none';
@@ -332,6 +360,11 @@
         const recList = document.getElementById('recommendations');
         recList.innerHTML = '';
         
+        if (!isValidWeatherData(temp)) {
+            recList.innerHTML = '<li>날씨 데이터가 없어 추천을 제공할 수 없습니다.</li>';
+            return;
+        }
+
         let clothes = '';
         let extra = '';
 
@@ -345,7 +378,7 @@
         else if (t >= 5) clothes = '코트, 가죽자켓, 히트텍, 니트, 청바지';
         else clothes = '패딩, 두꺼운 코트, 목도리, 기모제품';
 
-        if (pty !== '0') extra = '🌧️ 비나 눈이 올 수 있으니 우산을 챙기세요!';
+        if (pty && pty !== '0') extra = '🌧️ 비나 눈이 올 수 있으니 우산을 챙기세요!';
         else extra = '☀️ 맑은 날씨입니다. 좋은 하루 되세요!';
 
         recList.innerHTML += `<li><strong>추천 옷차림:</strong> ${clothes}</li>`;
