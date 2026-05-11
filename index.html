@@ -13,6 +13,9 @@
         .info-label { color: #666; font-size: 0.9rem; }
         .info-value { font-size: 1.5rem; font-weight: bold; color: #333; }
         #loading { display: none; }
+        .city-selector { margin-bottom: 20px; }
+        .city-btn { margin: 5px; }
+        .city-btn.active { background-color: #667eea !important; color: white !important; }
     </style>
 </head>
 <body>
@@ -24,10 +27,26 @@
 
 <div class="container">
     <div class="row justify-content-center">
-        <div class="col-md-8">
+        <div class="col-md-10">
+            <!-- 도시 선택 섹션 -->
+            <div class="card weather-card p-4 mb-4">
+                <h5 class="mb-3">📍 지역 선택</h5>
+                <div class="city-selector">
+                    <button class="btn btn-outline-primary city-btn active" onclick="selectCity('서울', 60, 127)">서울</button>
+                    <button class="btn btn-outline-primary city-btn" onclick="selectCity('부산', 74, 125)">부산</button>
+                    <button class="btn btn-outline-primary city-btn" onclick="selectCity('대구', 89, 131)">대구</button>
+                    <button class="btn btn-outline-primary city-btn" onclick="selectCity('인천', 55, 124)">인천</button>
+                    <button class="btn btn-outline-primary city-btn" onclick="selectCity('광주', 58, 74)">광주</button>
+                    <button class="btn btn-outline-primary city-btn" onclick="selectCity('대전', 68, 100)">대전</button>
+                    <button class="btn btn-outline-primary city-btn" onclick="selectCity('울산', 102, 137)">울산</button>
+                    <button class="btn btn-outline-primary city-btn" onclick="selectCity('제주', 52, 38)">제주</button>
+                </div>
+            </div>
+
+            <!-- 날씨 정보 표시 섹션 -->
             <div class="card weather-card p-4 mb-4">
                 <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h4 id="location">📍 서울특별시 (기준)</h4>
+                    <h4 id="location">📍 서울특별시</h4>
                     <button class="btn btn-primary" onclick="fetchWeather()">새로고침</button>
                 </div>
                 <hr>
@@ -60,10 +79,11 @@
                 </div>
             </div>
 
+            <!-- 추천 정보 섹션 -->
             <div class="card weather-card p-4">
                 <h5>💡 추천 옷차림 & 정보</h5>
                 <ul class="mt-2" id="recommendations">
-                    <li>날씨 정보를 불러오면 추천이 표시됩니다.</li>
+                    <li>지역을 선택하면 추천이 표시됩니다.</li>
                 </ul>
             </div>
         </div>
@@ -77,6 +97,25 @@
 
 <script>
     const API_KEY = 'f0646b0ddd72c825730d281eee88edde919d6cbd2c7385ac5546360905120820';
+    let currentCity = '서울';
+    let currentNx = 60;
+    let currentNy = 127;
+
+    // 도시 선택 함수
+    function selectCity(city, nx, ny) {
+        currentCity = city;
+        currentNx = nx;
+        currentNy = ny;
+        document.getElementById('location').innerText = `📍 ${city}`;
+        
+        // 활성 버튼 업데이트
+        document.querySelectorAll('.city-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        event.target.classList.add('active');
+        
+        fetchWeather();
+    }
 
     async function fetchWeather() {
         const loading = document.getElementById('loading');
@@ -96,14 +135,13 @@
             hour -= 1;
         }
         if (hour < 0) {
-            // 자정 이전 시간 처리 (간략화)
             hour = 23;
         }
         
         const baseDate = `${year}${month}${day}`;
         const baseTime = `${String(hour).padStart(2, '0')}00`;
 
-        const url = `https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst?serviceKey=${API_KEY}&pageNo=1&numOfRows=1000&dataType=JSON&base_date=${baseDate}&base_time=${baseTime}&nx=60&ny=127`;
+        const url = `https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst?serviceKey=${API_KEY}&pageNo=1&numOfRows=1000&dataType=JSON&base_date=${baseDate}&base_time=${baseTime}&nx=${currentNx}&ny=${currentNy}`;
 
         try {
             const response = await fetch(url);
