@@ -146,6 +146,10 @@
         let x = Math.floor(ra * Math.sin(theta) / GRID + XO + 0.5);
         let y = Math.floor(ro - ra * Math.cos(theta) / GRID + YO + 0.5);
 
+        // 기상청 격자 범위 제한 (한반도 범위 내)
+        x = Math.max(1, Math.min(149, x));
+        y = Math.max(1, Math.min(253, y));
+
         return { nx: x, ny: y };
     }
 
@@ -162,6 +166,7 @@
                     updateLocationInfo(lat, lon);
                 },
                 function(error) {
+                    console.error('위치 감지 오류:', error);
                     alert('위치 감지 실패: ' + error.message + '\n기본값(서울)으로 설정합니다.');
                     updateLocationInfo(37.5665, 126.9780); // 서울 기본값
                 }
@@ -212,29 +217,40 @@
         loading.style.display = 'block';
         content.style.opacity = '0.5';
 
+        // 현재 시간 기준으로 기상청 API 호출 시간 계산
         const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
+        let year = now.getFullYear();
+        let month = String(now.getMonth() + 1).padStart(2, '0');
+        let day = String(now.getDate()).padStart(2, '0');
         let hour = now.getHours();
         let minute = now.getMinutes();
 
         // 기상청 초단기실황은 매시 40분에 업데이트됨
+        // 현재 시간이 40분 미만이면 이전 시간 데이터 요청
         if (minute < 40) {
             hour -= 1;
-        }
-        if (hour < 0) {
-            hour = 23;
+            if (hour < 0) {
+                hour = 23;
+                // 어제 날짜로 변경
+                const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                year = yesterday.getFullYear();
+                month = String(yesterday.getMonth() + 1).padStart(2, '0');
+                day = String(yesterday.getDate()).padStart(2, '0');
+            }
         }
         
         const baseDate = `${year}${month}${day}`;
         const baseTime = `${String(hour).padStart(2, '0')}00`;
+
+        console.log(`API 호출 파라미터: baseDate=${baseDate}, baseTime=${baseTime}, nx=${window.currentNx}, ny=${window.currentNy}`);
 
         const url = `https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst?serviceKey=${API_KEY}&pageNo=1&numOfRows=1000&dataType=JSON&base_date=${baseDate}&base_time=${baseTime}&nx=${window.currentNx}&ny=${window.currentNy}`;
 
         try {
             const response = await fetch(url);
             const data = await response.json();
+
+            console.log('API 응답:', data);
 
             if (data.response.header.resultCode === '00') {
                 const items = data.response.body.items.item;
@@ -251,11 +267,14 @@
 
                 updateRecommendations(weatherData['T1H'], weatherData['PTY']);
             } else {
-                alert('데이터를 가져오는데 실패했습니다: ' + data.response.header.resultMsg);
+                console.error('API 에러 응답:', data.response.header);
+                alert('데이터를 가져오는데 실패했습니다: ' + data.response.header.resultMsg + 
+                      '\n\n디버깅 정보:\nbaseDate: ' + baseDate + '\nbaseTime: ' + baseTime + 
+                      '\nnx: ' + window.currentNx + '\nny: ' + window.currentNy);
             }
         } catch (error) {
-            console.error('Error:', error);
-            alert('API 호출 중 오류가 발생했습니다.');
+            console.error('네트워크 오류:', error);
+            alert('API 호출 중 오류가 발생했습니다: ' + error.message);
         } finally {
             loading.style.display = 'none';
             content.style.opacity = '1';
